@@ -4,17 +4,66 @@ import React from "react";
 import { Container, Grid } from "@mui/material";
 import { LeftPane } from "../leftPane/LeftPane";
 
+function base64ToHex(str: string) {
+  const raw = atob(str);
+  let result = "";
+  for (let i = 0; i < raw.length; i++) {
+    const hex = raw.charCodeAt(i).toString(16);
+    result += hex.length === 2 ? hex : "0" + hex;
+  }
+  return result.toUpperCase();
+}
+
+function jsonToHex(jsonString: string) {
+  // Convert the JSON string to a byte array
+  const byteArray = new TextEncoder().encode(jsonString);
+
+  // Generate the hex representation
+  let hex = "";
+  for (let i = 0; i < byteArray.length; i++) {
+    const hexByte = byteArray[i].toString(16);
+    hex += hexByte.length === 1 ? "0" + hexByte : hexByte;
+  }
+
+  return hex;
+}
+
+const hexToBytes = (hex: string) => {
+  const bytes = [];
+  for (let i = 0; i < hex.length; i += 2) {
+    bytes.push(parseInt(hex.substr(i, 2), 16));
+  }
+  return bytes;
+};
+
 export const ImageViewer = () => {
-  const [image, setImage] = React.useState<string>("");
-  const [editedImage, setEditedImage] = React.useState<string>("");
+  const [image, setImage] = React.useState("");
+  const [editedImage, setEditedImage] = React.useState<any>();
+  const [pureImage, setPureImage] = React.useState<any>("");
   const [metadata, setMetadata] = React.useState<any[]>([]);
   const cropperRef = React.createRef<ReactCropperElement>();
+
   const originalImage = new Image();
   originalImage.src = image;
 
   React.useEffect(() => {
     if (image) {
-      setEditedImage(image);
+      const hexImage = base64ToHex(image.split(",")[1]);
+      const hexMetadata = hexImage.substring(hexImage.lastIndexOf("FFD9") + 4);
+      const metadataBytes = hexToBytes(hexMetadata);
+      const existedMetadata = String.fromCharCode(...metadataBytes);
+      const imageWithoutMetadata = hexImage.substring(
+        0,
+        hexImage.lastIndexOf("FFD9") + 4
+      );
+      const uint8Array = new Uint8Array(hexToBytes(imageWithoutMetadata));
+      const blob = new Blob([uint8Array], { type: "image/jpeg" });
+      const imageUrl = URL.createObjectURL(blob);
+
+      setPureImage(imageWithoutMetadata);
+      setEditedImage(imageUrl);
+
+      if (existedMetadata) setMetadata(JSON.parse(existedMetadata));
     }
   }, [image]);
 
@@ -26,15 +75,14 @@ export const ImageViewer = () => {
       canvas.height = originalImage.height;
       ctx.drawImage(originalImage, 0, 0);
 
-      metadata.forEach((area: any, index) => {
+      metadata.forEach((area: any) => {
         // Fill the selected area with red color on the canvas
         ctx.fillStyle = "black";
         ctx.fillRect(area.x, area.y, area.width, area.height);
-        canvas.setAttribute(`data-metadata${index}`, JSON.stringify(area));
       });
 
       // Get the data URL of the canvas with the metadata
-      const canvasDataUrl = canvas.toDataURL();
+      const canvasDataUrl = canvas.toDataURL("image/jpeg");
       setEditedImage(canvasDataUrl);
     }
   }, [metadata]);
@@ -50,7 +98,7 @@ export const ImageViewer = () => {
   };
 
   const showAll = () => {
-    setEditedImage(image);
+    setEditedImage(editedImage);
     setMetadata([]);
   };
   const showSelectedArea = () => {
@@ -74,9 +122,15 @@ export const ImageViewer = () => {
   };
 
   const downloadImage = () => {
+    const modifiedImage = pureImage + jsonToHex(JSON.stringify(metadata));
+    const byteData = hexToBytes(modifiedImage);
+
+    // Create a Uint8Array from the byte array
+    const uint8Array = new Uint8Array(byteData);
     const link = document.createElement("a");
-    link.href = editedImage;
-    link.download = "image_with_metadata.png";
+    const blob = new Blob([uint8Array], { type: "image/jpeg" });
+    link.href = URL.createObjectURL(blob);
+    link.download = "image_with_metadata.jpeg";
     link.click();
   };
 
